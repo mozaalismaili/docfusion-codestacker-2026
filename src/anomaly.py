@@ -1,188 +1,218 @@
 import os
+import sys
 import json
 import csv
 import pickle
 import numpy as np
-from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.utils import resample
 import re
+from pathlib import Path
 
 
-def extract_features(record: dict, image_path: str = None) -> list:
+# ─── Image Feature Extractor─────────────────────────────
+
+def get_image_features(image_path: str) -> np.ndarray:
     """
-    Convert a receipt record into a feature vector for the ML model.
+    Extract rich image features using OpenCV and scikit-image.
+    No deep learning needed — uses classical computer vision.
+    
+    Features extracted:
+    - Noise and sharpness analysis
+    - Local Binary Patterns (texture)
+    - Frequency domain (FFT) analysis
+    - Edge and gradient statistics
+    - Block inconsistency (detects copy-paste regions)
+    - Compression artifact analysis
     """
     import cv2
+    from skimage.feature import local_binary_pattern
 
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return np.zeros(50)
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+        features = []
+
+        # --- Sharpness & Noise ---
+        # Laplacian variance: low = blurry, high = sharp
+        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        features.append(lap.var())
+        features.append(lap.mean())
+
+        # --- Brightness Statistics ---
+        features.append(float(gray.mean()))
+        features.append(float(gray.std()))
+        features.append(float(gray.min()))
+        features.append(float(gray.max()))
+
+        # --- Edge Analysis (Canny) ---
+        edges = cv2.Canny(gray, 50, 150)
+        features.append(float(edges.mean()))
+        features.append(float(edges.std()))
+
+        # --- Gradient Analysis (Sobel) ---
+        sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_mag = np.sqrt(sobel_x**2 + sobel_y**2)
+        features.append(gradient_mag.mean())
+        features.append(gradient_mag.std())
+        features.append(gradient_mag.max())
+
+        # --- Local Binary Patterns (Texture) ---
+        # LBP detects texture inconsistencies caused by copy-paste
+        radius   = 3
+        n_points = 8 * radius
+        lbp      = local_binary_pattern(gray, n_points, radius, method="uniform")
+        lbp_hist, _ = np.histogram(lbp, bins=26, range=(0, 26), density=True)
+        features.extend(lbp_hist.tolist())  # 26 features
+
+        # --- Frequency Domain Analysis (FFT) ---
+        # Forged images often have unusual frequency patterns
+        fft        = np.fft.fft2(gray)
+        fft_shift  = np.fft.fftshift(fft)
+        magnitude  = np.abs(fft_shift)
+        log_mag    = np.log1p(magnitude)
+        features.append(log_mag.mean())
+        features.append(log_mag.std())
+        features.append(log_mag.max())
+
+        # --- Block Inconsistency Analysis ---
+        # Split image into 4 blocks and compare statistics
+        # Copy-paste forgeries create blocks with different noise levels
+        blocks = [
+            gray[:h//2, :w//2],
+            gray[:h//2, w//2:],
+            gray[h//2:, :w//2],
+            gray[h//2:, w//2:]
+        ]
+        block_means = [b.mean() for b in blocks]
+        block_stds  = [b.std()  for b in blocks]
+        block_vars  = [b.var()  for b in blocks]
+
+        features.append(max(block_means) - min(block_means))  # brightness inconsistency
+        features.append(max(block_stds)  - min(block_stds))   # texture inconsistency
+        features.append(max(block_vars)  - min(block_vars))   # variance inconsistency
+        features.append(np.std(block_means))
+        features.append(np.std(block_stds))
+
+        # --- JPEG Artifact Analysis ---
+        # Re-encode image at low quality and measure difference
+        # Forged images often have double-compression artifacts
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, 50]
+        _, encoded    = cv2.imencode(".jpg", gray, encode_params)
+        decoded       = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE)
+        diff          = np.abs(gray.astype(float) - decoded.astype(float))
+        features.append(diff.mean())
+        features.append(diff.std())
+        features.append(diff.max())
+
+        return np.array(features, dtype=np.float32)
+
+    except Exception as e:
+        return np.zeros(50)
+
+
+# ─── Text Feature Extractor ──────────────────────────────────────────────────
+
+def extract_text_features(record: dict) -> list:
+    """Extract 10 text-based features from a receipt record."""
     features = []
 
-    # --- Text-based features ---
-
-    # Feature 1: is vendor missing?
     features.append(0 if record.get("vendor") else 1)
-
-    # Feature 2: is date missing?
     features.append(0 if record.get("date") else 1)
-
-    # Feature 3: is total missing?
     features.append(0 if record.get("total") else 1)
 
-    # Feature 4: total amount value
     total = record.get("total")
     try:
         total_val = float(str(total).replace(",", ".")) if total else 0.0
     except ValueError:
         total_val = 0.0
     features.append(total_val)
-
-    # Feature 5: log of total
     features.append(np.log1p(total_val))
 
-    # Feature 6: number of OCR text lines
     raw_lines = record.get("raw_lines", [])
     features.append(len(raw_lines))
 
-    # Feature 7: average line length
     avg_len = sum(len(l) for l in raw_lines) / len(raw_lines) if raw_lines else 0.0
     features.append(avg_len)
 
-    # Feature 8: number of amount-like patterns
     amount_pattern = r"\b\d{1,6}\.\d{2}\b"
-    amount_count = sum(len(re.findall(amount_pattern, line)) for line in raw_lines)
+    amount_count   = sum(len(re.findall(amount_pattern, line)) for line in raw_lines)
     features.append(amount_count)
 
-    # Feature 9: how many times total repeats
     if total and total_val > 0:
-        total_str = f"{total_val:.2f}"
+        total_str         = f"{total_val:.2f}"
         total_occurrences = sum(total_str in line for line in raw_lines)
     else:
         total_occurrences = 0
     features.append(total_occurrences)
 
-    # Feature 10: number of lines with numbers
     numeric_lines = sum(1 for line in raw_lines if re.search(r"\d", line))
     features.append(numeric_lines)
-
-    # --- Image-based features ---
-    if image_path and os.path.exists(image_path):
-        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        if img is not None:
-            # Feature 11: image noise level (std of laplacian)
-            laplacian = cv2.Laplacian(img, cv2.CV_64F)
-            features.append(laplacian.var())
-
-            # Feature 12: mean brightness
-            features.append(float(img.mean()))
-
-            # Feature 13: brightness std (inconsistent lighting = suspicious)
-            features.append(float(img.std()))
-
-            # Feature 14: number of edges (canny)
-            edges = cv2.Canny(img, 100, 200)
-            features.append(float(edges.mean()))
-
-            # Feature 15: block noise variance
-            # Split image into 4 blocks and measure variance difference
-            h, w = img.shape
-            blocks = [
-                img[:h//2, :w//2],
-                img[:h//2, w//2:],
-                img[h//2:, :w//2],
-                img[h//2:, w//2:]
-            ]
-            block_vars = [b.var() for b in blocks]
-            features.append(max(block_vars) - min(block_vars))
-        else:
-            features.extend([0.0] * 5)
-    else:
-        features.extend([0.0] * 5)
 
     return features
 
 
-def load_training_data(train_dir: str, extract_fn):
+def extract_features(record: dict, image_path: str = None) -> np.ndarray:
     """
-    Load training data from train_dir.
-    train_dir should contain train.jsonl and images/
-    extract_fn is the extract_fields function from extractor.py
+    Combine text features + image features.
+    Total: 10 text + ~50 image = ~60 features
     """
-    train_jsonl = os.path.join(train_dir, "train.jsonl")
-    images_dir  = os.path.join(train_dir, "images")
+    text_features = np.array(extract_text_features(record), dtype=np.float32)
 
-    X, y = [], []
+    if image_path and os.path.exists(image_path):
+        image_features = get_image_features(image_path)
+    else:
+        image_features = np.zeros(50, dtype=np.float32)
 
-    with open(train_jsonl, encoding="utf-8") as f:
-        for line in f:
-            record = json.loads(line)
-            img_id    = record["id"]
-            is_forged = int(record.get("is_forged", 0))
+    return np.concatenate([text_features, image_features])
 
-            # Find the image file
-            img_path = None
-            for ext in [".jpg", ".png", ".jpeg"]:
-                candidate = os.path.join(images_dir, img_id + ext)
-                if os.path.exists(candidate):
-                    img_path = candidate
-                    break
 
-            if img_path is None:
-                continue
-
-            # Extract fields from image
-            extracted = extract_fn(img_path)
-
-            # Build feature vector
-            features = extract_features(extracted)
-            X.append(features)
-            y.append(is_forged)
-
-    return np.array(X), np.array(y)
-
+# ─── Model Training ──────────────────────────────────────────────────────────
 
 def train_model(X: np.ndarray, y: np.ndarray):
-    """Train a Random Forest classifier with class balancing."""
-    # Balance the dataset since forged receipts are only ~16%
-    X_genuine = X[y == 0]
-    y_genuine = y[y == 0]
-    X_forged  = X[y == 1]
-    y_forged  = y[y == 1]
+    """Train using XGBoost with scale_pos_weight for imbalance."""
+    from sklearn.preprocessing import StandardScaler
+    from xgboost import XGBClassifier
 
-    # Upsample forged class to match genuine count
-    X_forged_up, y_forged_up = resample(
-        X_forged, y_forged,
-        replace=True,
-        n_samples=len(X_genuine),
-        random_state=42
-    )
+    # Calculate imbalance ratio
+    n_genuine = (y == 0).sum()
+    n_forged  = (y == 1).sum()
+    scale     = n_genuine / n_forged
+    print(f"Class ratio: {scale:.1f}x (genuine/forged)")
 
-    X_balanced = np.vstack([X_genuine, X_forged_up])
-    y_balanced = np.hstack([y_genuine, y_forged_up])
+    scaler   = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-    # Scale features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_balanced)
-
-    # Train Random Forest
-    clf = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
+    clf = XGBClassifier(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.05,
+        scale_pos_weight=scale,  # handles imbalance automatically
+        subsample=0.8,
+        colsample_bytree=0.8,
         random_state=42,
-        n_jobs=-1
+        eval_metric="logloss",
+        verbosity=0
     )
-    clf.fit(X_scaled, y_balanced)
+    clf.fit(X_scaled, y)
 
     return clf, scaler
 
 
-def predict_forgery(clf, scaler, record: dict) -> int:
+# ─── Prediction ──────────────────────────────────────────────────────────────
+
+def predict_forgery(clf, scaler, record: dict, image_path: str = None) -> int:
     """Predict if a receipt is forged. Returns 0 or 1."""
-    features = extract_features(record)
-    X = np.array([features])
+    features = extract_features(record, image_path)
+    X        = features.reshape(1, -1)
     X_scaled = scaler.transform(X)
     return int(clf.predict(X_scaled)[0])
 
+
+# ─── Save / Load ─────────────────────────────────────────────────────────────
 
 def save_model(clf, scaler, model_dir: str):
     """Save model and scaler to disk."""
@@ -202,9 +232,10 @@ def load_model(model_dir: str):
         scaler = pickle.load(f)
     return clf, scaler
 
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    import sys
-    import csv
     from sklearn.metrics import classification_report
     from sklearn.model_selection import cross_val_score
     sys.path.insert(0, str(Path(__file__).parent))
@@ -212,12 +243,11 @@ if __name__ == "__main__":
 
     finditagain_root = Path("data/finditagain")
 
-    # Load ALL training samples
     print("Building features from Find-It-Again train set...")
     X_train, y_train = [], []
 
     with open(finditagain_root / "train.txt", encoding="utf-8") as f:
-        reader = csv.reader(f)
+        reader     = csv.reader(f)
         next(reader)
         train_rows = [
             (row[0], int(row[3]))
@@ -236,12 +266,11 @@ if __name__ == "__main__":
         if len(X_train) % 50 == 0:
             print(f"  Processed {len(X_train)} train images...")
 
-    # Load validation samples
     print("\nBuilding features from Find-It-Again val set...")
     X_val, y_val = [], []
 
     with open(finditagain_root / "val.txt", encoding="utf-8") as f:
-        reader = csv.reader(f)
+        reader   = csv.reader(f)
         next(reader)
         val_rows = [
             (row[0], int(row[3]))
@@ -268,21 +297,17 @@ if __name__ == "__main__":
     print(f"\nTrain: {len(y_train)} samples, {y_train.sum()} forged")
     print(f"Val  : {len(y_val)} samples, {y_val.sum()} forged")
 
-    # Train model
     clf, scaler = train_model(X_train, y_train)
 
-    # Evaluate on validation set
     X_val_scaled = scaler.transform(X_val)
     y_pred       = clf.predict(X_val_scaled)
 
-    print("\nValidation set performance (honest evaluation):")
+    print("\nValidation set performance:")
     print(classification_report(y_val, y_pred, target_names=["Genuine", "Forged"]))
 
-    # Cross validation score
     scores = cross_val_score(
         clf, scaler.transform(X_train), y_train, cv=5, scoring="f1"
     )
-    print(f"Cross-validation F1 score: {scores.mean():.2f} (+/- {scores.std():.2f})")
+    print(f"Cross-validation F1: {scores.mean():.2f} (+/- {scores.std():.2f})")
 
-    # Save model
     save_model(clf, scaler, "models/anomaly")

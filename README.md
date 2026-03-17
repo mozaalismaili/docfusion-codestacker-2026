@@ -200,7 +200,7 @@ forgery is hard to catch with text-only or simple image statistics.
 
 The Streamlit web UI (`app.py`) was built with AI assistance. I have solid Python 
 and ML experience but limited frontend and UI experience. I used AI to help 
-structure the Streamlit layout while I focused my energy on the core pipeline — 
+structure the Streamlit layout while I focused my energy on the core pipeline,
 the OCR, extraction logic, feature engineering, and model training. I believe in 
 being transparent about this.
 

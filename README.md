@@ -148,11 +148,33 @@ This is why I added the image-based features.
 
 **Why Random Forest over other models?**
 
-I considered neural networks but rejected them for this challenge specifically 
-because Level 4 penalizes slow inference and high memory usage. Random Forest 
-gives a good balance of accuracy, speed, and small model size. With more time 
-and data I would explore a Vision Transformer or EfficientNet for the visual 
-forgery detection component.
+I have used XGBoost extensively in previous projects and my first instinct was 
+to use it here. XGBoost is powerful, it builds trees sequentially where each 
+tree learns from the mistakes of the previous one, which often gives better 
+accuracy than Random Forest on tabular data. I also considered using ensemble 
+approaches that try multiple models and pick the best performer automatically.
+
+However I made a deliberate decision not to use XGBoost for this challenge for 
+two reasons:
+
+First, Level 4 explicitly measures inference speed and memory usage. XGBoost 
+models tend to be larger and slightly slower than Random Forest, especially 
+with many estimators. Given that the autograder benchmarks performance, I could 
+not justify the trade-off.
+
+Second, our dataset is small (only 577 training samples). XGBoost's sequential 
+boosting approach shines with larger datasets where it can correct many errors 
+iteratively. With 577 samples, the advantage over Random Forest is marginal and 
+not worth the performance cost.
+
+With more time I would run a proper comparison, train both models, measure their 
+inference time and memory on the same hardware, and make a data-driven decision 
+rather than an intuition-based one. That is the honest answer.
+
+I would also explore ensemble stacking: use XGBoost for text features and a 
+lightweight CNN for image features, then combine their predictions. That hybrid 
+approach could address the core weakness of my current solution — that visual 
+forgery is hard to catch with text-only or simple image statistics.
 
 ---
 

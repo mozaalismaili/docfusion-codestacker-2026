@@ -2,12 +2,14 @@
 paddlepaddle==3.0.0
 paddleocr==2.9.1
 opencv-python==4.9.0.80
+opencv-python-headless==4.9.0.80
 Pillow==10.3.0
 numpy==1.26.4
 
 # Data & ML
 pandas==2.2.2
 scikit-learn==1.4.2
+scikit-image
 scipy==1.13.0
 
 # NLP / Extraction

@@ -6,10 +6,7 @@
 ## My Journey With This Challenge
 
 When I first read the problem statement, my immediate reaction was excitement mixed 
-with a healthy amount of uncertainty. I am a final-semester student who has worked 
-with Python and ML models before, but building a full end-to-end document 
-intelligence pipeline from scratch — with real messy data, OCR noise, and a strict 
-autograder harness — was a different challenge entirely.
+with a healthy amount of uncertainty. 
 
 This README is not just documentation. It is an honest account of how I thought 
 through this problem, what failed, what worked, and what I would do differently.
@@ -20,8 +17,8 @@ through this problem, what failed, what worked, and what I would do differently.
 
 The first question I asked myself was: *where do I even start?*
 
-Three datasets, four levels, an autograder harness, and a web UI — all within a 
-tight deadline. I decided to treat this like a real engineering problem rather than 
+Three datasets, four levels, an autograder harness, and a web UI 
+all within a tight deadline. I decided to treat this like a real engineering problem rather than 
 a homework assignment. That meant:
 
 1. Understand the data before writing a single line of model code
@@ -30,7 +27,7 @@ a homework assignment. That meant:
 
 ---
 
-## Dataset Discovery — Harder Than Expected
+## Dataset Discovery  (Harder Than Expected)
 
 This was honestly the hardest part for me.
 
@@ -46,7 +43,6 @@ For example, my first attempt to parse Find-It-Again labels failed immediately:
 ```
 ValueError: invalid literal for int() with base 10: 'annotation,handwritten'
 ```
-
 That error taught me something important — always inspect the raw file before 
 assuming its format. After printing the first few lines I realized it was a CSV 
 with a header row and multiple columns. A small discovery, but it cost me time.
@@ -74,7 +70,7 @@ I evaluated three options:
 I chose **PaddleOCR** because Level 4 explicitly measures inference speed and memory 
 usage. A highly accurate but slow model would hurt my score where it matters most.
 
-### Field Extraction — Rule-Based First
+### Field Extraction (Rule-Based First)
 
 My first instinct was to use a language model for extraction. But I stepped back and 
 asked: do I really need that? The fields are structured and receipts follow patterns. 
@@ -108,7 +104,7 @@ Total accuracy  : 44.2%
 Honest assessment: these numbers are modest. The pipeline is functional and handles 
 diverse layouts, but accuracy needs improvement.
 
-### Anomaly Detection — The ML Part
+### Anomaly Detection (The ML Part)
 
 This is where the real machine learning happens. My approach:
 
@@ -141,7 +137,7 @@ F1 cross-validation: 0.05
 
 The model was basically ignoring forged receipts entirely. I realized two things:
 
-First, the dataset is heavily imbalanced — only 16% forged. A model that always 
+First, the dataset is heavily imbalanced (only 16% forged). A model that always 
 says "genuine" gets 84% accuracy without learning anything. I fixed this by 
 upsampling the forged class during training.
 

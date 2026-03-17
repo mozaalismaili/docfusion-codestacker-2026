@@ -281,3 +281,30 @@ python src/anomaly.py
 | SROIE | Kaggle | Primary extraction training data |
 | CORD | HuggingFace | Layout diversity and robustness |
 | Find-It-Again | L3i / Kaggle | Forgery detection labels |
+
+## Why Each Dataset Was Used Differently
+
+A key insight from this challenge is that the three datasets serve fundamentally 
+different purposes and cannot be used interchangeably.
+
+SROIE was used to evaluate extraction accuracy, it has clean vendor, date, and 
+total labels which made it perfect for measuring how well our regex rules perform. 
+With more time I would have used it to train a proper NER extraction model instead 
+of relying on rules.
+
+CORD was downloaded and available but not fully leveraged. Its value is in layout 
+diversity, thousands of receipts with different structures. I used it to confirm 
+the pipeline handles varied formats without crashing, but did not train on it 
+directly because its ground truth focuses on item-level annotations rather than 
+the key fields the challenge requires.
+
+Find-It-Again was the only dataset used for anomaly model training because it is 
+the only one with forgery labels. This is not a limitation of our approach, it 
+is a fundamental constraint of supervised learning. You cannot teach a model to 
+detect forgery without examples of both genuine and forged documents.
+
+This separation taught me something important: in real document intelligence 
+systems, different models serve different purposes and are trained on different 
+data. A production system would have a dedicated extraction model, a dedicated 
+anomaly model, and a separate quality control layer — each trained on the most 
+appropriate data for its specific task.

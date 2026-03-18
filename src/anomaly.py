@@ -107,11 +107,15 @@ def get_image_features(image_path: str) -> np.ndarray:
         features.append(diff.mean())
         features.append(diff.std())
         features.append(diff.max())
-
-        return np.array(features, dtype=np.float32)
+        # Ensure exactly 48 image features always
+        result = np.array(features, dtype=np.float32)
+        if len(result) < 48:
+            result = np.pad(result, (0, 48 - len(result)))
+        return result[:48]
 
     except Exception as e:
-        return np.zeros(50)
+        return np.zeros(48, dtype=np.float32)
+
 
 
 # ─── Text Feature Extractor ──────────────────────────────────────────────────
@@ -156,18 +160,20 @@ def extract_text_features(record: dict) -> list:
 
 
 def extract_features(record: dict, image_path: str = None) -> np.ndarray:
-    """
-    Combine text features + image features.
-    Total: 10 text + ~50 image = ~60 features
-    """
-    text_features = np.array(extract_text_features(record), dtype=np.float32)
+    """Combine text features + image features. Always 58 features total."""
+    text_features = np.array(extract_text_features(record), dtype=np.float32)  # 10
 
     if image_path and os.path.exists(image_path):
-        image_features = get_image_features(image_path)
+        image_features = get_image_features(image_path)  # 48
     else:
-        image_features = np.zeros(50, dtype=np.float32)
+        image_features = np.zeros(48, dtype=np.float32)
 
-    return np.concatenate([text_features, image_features])
+    combined = np.concatenate([text_features, image_features])
+
+    # Safety check — always return exactly 58 features
+    if len(combined) < 58:
+        combined = np.pad(combined, (0, 58 - len(combined)))
+    return combined[:58]
 
 
 # ─── Model Training ──────────────────────────────────────────────────────────

@@ -12,11 +12,18 @@ This is the **cloud demo** of DocFusion. It uses EasyOCR for text extraction.
 The full pipeline with PaddleOCR runs locally for better accuracy.
 """)
 
-# Load EasyOCR lazily
 @st.cache_resource
 def load_ocr():
-    import easyocr
-    return easyocr.Reader(["en"], gpu=False)
+    import pytesseract
+    return pytesseract
+
+def run_easyocr(image_path: str, reader) -> list:
+    import pytesseract
+    from PIL import Image
+    img   = Image.open(image_path)
+    text  = pytesseract.image_to_string(img)
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    return lines
 
 # Load anomaly model lazily
 @st.cache_resource
@@ -33,9 +40,7 @@ def load_anomaly_model():
     return clf, scaler
 
 
-def run_easyocr(image_path: str, reader) -> list:
-    results = reader.readtext(image_path)
-    return [text for _, text, conf in results if conf > 0.3]
+
 
 
 def extract_vendor(lines):

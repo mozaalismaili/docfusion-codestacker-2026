@@ -1,310 +1,283 @@
 # DocFusion — Rihal CodeStacker 2026 ML Challenge
-### by Moza Amur
+by Moza Amur
 
 ---
 
-## My Journey With This Challenge
+## What is This Project?
 
-When I first read the problem statement, my immediate reaction was excitement mixed 
-with a healthy amount of uncertainty. 
+DocFusion is an intelligent document processing pipeline. You give it a receipt image, it reads the text, pulls out the important fields like vendor name, date, and total amount, and then decides if the receipt looks genuine or forged.
 
-This README is not just documentation. It is an honest account of how I thought 
-through this problem, what failed, what worked, and what I would do differently.
-
----
-
-## First Thoughts
-
-The first question I asked myself was: *where do I even start?*
-
-Three datasets, four levels, an autograder harness, and a web UI 
-all within a tight deadline. I decided to treat this like a real engineering problem rather than 
-a homework assignment. That meant:
-
-1. Understand the data before writing a single line of model code
-2. Build a working pipeline end to end, even if imperfect
-3. Improve incrementally rather than trying to be perfect from the start
+I built this for the Rihal CodeStacker 2026 ML Challenge.
+This README is my honest story of how I built it — what I tried, what failed, what worked, and what I would do differently.
 
 ---
 
-## Dataset Discovery  (Harder Than Expected)
+## The Problem
 
-This was honestly the hardest part for me.
+Thousands of receipts and invoices are processed every day in organizations. Most of the information is locked inside scanned images. Someone has to read them manually, type the data into a system, and check if anything looks suspicious. That is slow, expensive, and error-prone.
 
-The three datasets — SROIE, CORD, and Find-It-Again — are very different from each 
-other in structure, format, and purpose. I spent significant time just figuring out:
-
-- What fields each dataset actually contains
-- How the label files are formatted
-- Why Find-It-Again's `train.txt` is a CSV with complex JSON inside some columns,
-  not a simple two-column file like I assumed
-
-For example, my first attempt to parse Find-It-Again labels failed immediately:
-```
-ValueError: invalid literal for int() with base 10: 'annotation,handwritten'
-```
-That error taught me something important — always inspect the raw file before 
-assuming its format. After printing the first few lines I realized it was a CSV 
-with a header row and multiple columns. A small discovery, but it cost me time.
-
-I also discovered through a GitHub issue on the challenge repo that CORD does not 
-contain `vendor` or `date` fields in its ground truth — the organizers confirmed 
-it is acceptable to return `null` for fields that do not exist in a dataset. That 
-clarification changed how I thought about the pipeline's job: not perfect extraction, 
-but robust handling of heterogeneous inputs.
+DocFusion automates this. Upload an image, get structured data back.
 
 ---
 
-## My Approach
+## Where I Started
 
-### OCR Engine Selection
+When I first read the challenge, I asked myself: where do I even start?
 
-I evaluated three options:
+Three datasets, four levels, an autograder, and a web UI (all within a tight deadline). I decided to treat it like a real engineering problem. That meant understanding the data first before writing any model code, building something that works end to end even if imperfect, and improving step by step.
 
-| Option | Accuracy | Speed | Memory | Windows Support |
-|---|---|---|---|---|
-| Tesseract | Medium | Medium | Low | Difficult to install |
-| TrOCR | High | Slow | Very High | Complex |
-| PaddleOCR | Good | Fast | Low | Easy |
+---
 
-I chose **PaddleOCR** because Level 4 explicitly measures inference speed and memory 
-usage. A highly accurate but slow model would hurt my score where it matters most.
+## The Datasets
 
-### Field Extraction (Rule-Based First)
+I used three datasets. They each have a different job.
 
-My first instinct was to use a language model for extraction. But I stepped back and 
-asked: do I really need that? The fields are structured and receipts follow patterns. 
-Regex rules with PaddleOCR output should work.
+**SROIE** — 973 scanned English receipts with labeled fields (vendor, date, total). I used this to measure how accurate my field extraction is.
 
-My first results on 626 SROIE receipts:
+**CORD** — 1000 receipts with diverse layouts from different shops and countries. I used this to test that the pipeline does not break on unusual formats.
+
+**Find-It-Again** — 988 receipts where 163 of them are forged. Realistic forgeries — copy-paste attacks, tampered text. I used this to train the anomaly detection model.
+
+One thing I discovered early: these three datasets cannot be used interchangeably. CORD does not have vendor or date in its ground truth. SROIE has no forgery labels. Only Find-It-Again has forgery labels. Each dataset has its own purpose and I had to respect that.
+
+I also found out through a GitHub issue on the challenge repo that returning null for missing fields is acceptable. That changed my thinking — the goal is not perfect extraction, it is a robust pipeline that handles anything you throw at it.
+
+---
+
+## Dataset Sizes
+
+| Dataset | Receipts | Forged | Size on Disk |
+|---|---|---|---|
+| SROIE | 973 | None | ~200MB |
+| CORD | 1,000 | None | ~1.8GB |
+| Find-It-Again | 988 | 163 (16%) | ~150MB |
+| Total | 2,961 | 163 | ~2.15GB |
+
+---
+
+## Choosing the OCR Engine
+
+I looked at three options before starting.
+
+**Tesseract** is the classic open source OCR. It works but is not very accurate on noisy scanned receipts, and it is hard to install on Windows.
+
+**TrOCR** is a modern transformer-based model with high accuracy. The problem is it is very heavy on memory and slow on CPU. The challenge measures inference speed and memory in Level 4, so this would hurt my score where it matters.
+
+**PaddleOCR** is fast, accurate on receipts, works well on Windows, and is lightweight enough for production. This was the clear choice.
+
+For the cloud demo I used **Tesseract via pytesseract** because PaddleOCR cannot install on the Streamlit Cloud server. The accuracy is lower but it is good enough for a demo. The full pipeline with PaddleOCR runs locally.
+
+I also tried EasyOCR as a middle ground for the cloud, it is more accurate than Tesseract and simpler than PaddleOCR. But it requires PyTorch which caused DLL errors on Windows and installation failures on the cloud. So I dropped it.
+
+---
+
+## Field Extraction
+
+My first instinct was to use a language model to extract fields. Then I stepped back and asked: do I really need that? Receipts follow patterns. Regex should work.
+
+I built a rule-based extractor using PaddleOCR output:
+- Vendor: look for company indicators like SDN BHD, ENTERPRISE, LTD in the first few lines
+- Date: match common date patterns like DD/MM/YYYY or YYYY-MM-DD
+- Total: find lines with total keywords near the bottom of the receipt
+
+My first accuracy on 626 SROIE receipts:
 ```
-Vendor accuracy : 41.5%
-Date accuracy   : 45.8%
-Total accuracy  : 46.3%
+Vendor : 41.5%
+Date   : 45.8%
+Total  : 46.3%
 ```
 
-Not great. I spent time iterating on the rules — improving vendor detection by 
-looking for company indicators like `SDN BHD`, `ENTERPRISE`, `LTD`, fixing date 
-patterns to handle merged OCR outputs like `12-01-1921` instead of `12-01-19`, 
-and making the total extractor prefer lines near the bottom of the receipt.
+I spent time improving the rules, better vendor detection, fixing date patterns, smarter total extraction. After several iterations the scores barely moved. This taught me something important: rule-based systems have a ceiling. OCR noise is too unpredictable for regex to handle reliably.
 
-After several iterations the scores did not improve dramatically. This taught me 
-something I will remember: **rule-based systems have a ceiling**. The OCR noise is 
-sometimes too unpredictable for regex to handle reliably. With more time I would 
-replace the regex extractor with a fine-tuned named entity recognition model or a 
-small language model specifically trained on receipt text.
-
-Final extraction scores:
+Final scores after all improvements:
 ```
-Vendor accuracy : 41.7%
-Date accuracy   : 45.8%
-Total accuracy  : 44.2%
+Vendor : 41.7%
+Date   : 45.8%
+Total  : 44.2%
 ```
 
-Honest assessment: these numbers are modest. The pipeline is functional and handles 
-diverse layouts, but accuracy needs improvement.
+Honest assessment: these numbers are modest. The pipeline works and handles diverse layouts, but with more time I would replace the regex extractor with LayoutLM or a fine-tuned NER model that understands both text content and spatial position on the document.
 
-### Anomaly Detection (The ML Part)
+---
 
-This is where the real machine learning happens. My approach:
+## Anomaly Detection — The ML Part
 
-1. Convert each receipt into a 15-dimensional feature vector
-2. Train a Random Forest classifier on Find-It-Again labels
+This is where the actual machine learning happens. The goal is to predict is_forged: 0 for genuine, 1 for forged.
 
-**Text-based features I used:**
+I went through four iterations.
+
+**Iteration 1: Text features only**
+
+I converted each receipt into 10 numbers:
 - Is vendor missing?
 - Is date missing?
 - Is total missing?
 - Total amount value and its log
 - Number of OCR lines
 - Average line length
-- Number of price patterns in text
-- How many times the total repeats
+- Number of price patterns in the text
+- How many times total repeats
+- Number of lines with numbers
 
-**Image-based features I added:**
-- Laplacian variance (measures image sharpness/noise)
-- Mean brightness and standard deviation
-- Edge density via Canny edge detection
-- Block variance difference (detects inconsistent regions)
-
-My first honest evaluation on the validation set:
+Results on validation set:
 ```
-Genuine:  84% precision, 91% recall
-Forged:   25% precision, 15% recall
-Overall accuracy: 78%
-F1 cross-validation: 0.05
+Genuine: 84% precision, 91% recall
+Forged:  25% precision, 15% recall
+Overall: 78% accuracy
+Forged F1: 0.19
 ```
 
-The model was basically ignoring forged receipts entirely. I realized two things:
+The model was basically ignoring forged receipts. Two problems. First, the dataset is heavily imbalanced — only 16% forged. A model that always says genuine gets 84% accuracy without learning anything. Second, the forgeries in Find-It-Again are visual — tampered pixels and copy-paste. Text features alone cannot catch that.
 
-First, the dataset is heavily imbalanced (only 16% forged). A model that always 
-says "genuine" gets 84% accuracy without learning anything. I fixed this by 
-upsampling the forged class during training.
+**Iteration 2: Text + basic OpenCV image features**
 
-Second, and more importantly — the forgeries in Find-It-Again are **visual**. 
-A tampered pixel or copy-pasted region does not change the text fields much. 
-My text features alone were never going to catch visual forgery reliably. 
-This is why I added the image-based features.
+I added brightness statistics, edge density, and block variance to detect inconsistent regions. The forged recall actually got worse — more features confused the model because we had too little training data.
+```
+Forged F1: 0.14
+```
 
-**Why Random Forest over other models?**
+**Iteration 3: Text + LBP + FFT + compression artifacts**
 
-I have used XGBoost extensively in previous projects and my first instinct was 
-to use it here. XGBoost is powerful, it builds trees sequentially where each 
-tree learns from the mistakes of the previous one, which often gives better 
-accuracy than Random Forest on tabular data. I also considered using ensemble 
-approaches that try multiple models and pick the best performer automatically.
+I added Local Binary Patterns for texture analysis and FFT frequency analysis. These are classical computer vision techniques that can detect copy-paste patterns. Still not much improvement.
+```
+Forged F1: 0.10
+```
 
-However I made a deliberate decision not to use XGBoost for this challenge for 
-two reasons:
+**Iteration 4: Switch to XGBoost**
 
-First, Level 4 explicitly measures inference speed and memory usage. XGBoost 
-models tend to be larger and slightly slower than Random Forest, especially 
-with many estimators. Given that the autograder benchmarks performance, I could 
-not justify the trade-off.
+I switched from Random Forest to XGBoost with scale_pos_weight to handle the class imbalance automatically. XGBoost builds trees sequentially — each tree learns from the mistakes of the previous one. Combined with the image features, this gave the best result.
+```
+Genuine: 84% precision, 90% recall
+Forged:  27% precision, 18% recall
+Overall: 78% accuracy
+Forged F1: 0.22
+Cross-validation F1: 0.16
+```
 
-Second, our dataset is small (only 577 training samples). XGBoost's sequential 
-boosting approach shines with larger datasets where it can correct many errors 
-iteratively. With 577 samples, the advantage over Random Forest is marginal and 
-not worth the performance cost.
+**Full comparison:**
 
-With more time I would run a proper comparison, train both models, measure their 
-inference time and memory on the same hardware, and make a data-driven decision 
-rather than an intuition-based one. That is the honest answer.
+| Iteration | Features | Forged F1 |
+|---|---|---|
+| 1 | Text only, Random Forest | 0.19 |
+| 2 | Text + OpenCV basics, Random Forest | 0.14 |
+| 3 | Text + LBP + FFT, Random Forest | 0.10 |
+| 4 | Text + image features, XGBoost | 0.22 |
 
-I would also explore ensemble stacking: use XGBoost for text features and a 
-lightweight CNN for image features, then combine their predictions. That hybrid 
-approach could address the core weakness of my current solution — that visual 
-forgery is hard to catch with text-only or simple image statistics.
+XGBoost won.
 
 ---
 
-## What I Would Improve With More Time
+## Why XGBoost Over Random Forest?
 
-1. **Better extraction** — Replace regex with a fine-tuned NER model or 
-   LayoutLM, which understands both text and spatial layout of documents
+I have used XGBoost a lot in previous projects. It is powerful and often gives better accuracy than Random Forest on tabular data because it builds trees sequentially and corrects its own mistakes.
 
-2. **Better forgery detection** — Use a CNN or Vision Transformer to detect 
-   visual tampering at the pixel level rather than relying on high-level features
+My initial plan was actually to use Random Forest because I was worried about Level 4 performance constraints (XGBoost models can be larger and slower). But after Random Forest kept performing poorly on forged detection, I switched.
 
-3. **CORD integration** — I used CORD for diversity but did not fully leverage 
-   its item-level annotations for richer feature engineering
+The key feature that made the difference is scale_pos_weight. This tells XGBoost that forged receipts are rare and should be weighted more heavily during training. It is built specifically for imbalanced datasets, which is exactly our problem.
 
-4. **Proper cross-dataset evaluation** — Test the pipeline on CORD and 
-   Find-It-Again together to measure true generalization
+With more time I would run a proper comparison — train both, measure inference time and memory on the same machine, and make a data-driven decision. But given the results, XGBoost was clearly the right call here.
 
-5. **Docker containerization** — Did not have time to complete the Dockerfile
+---
+
+## What I Would Improve
+
+Better extraction: Replace regex with LayoutLM or a fine-tuned NER model. LayoutLM understands both text and where it appears on the page, which is exactly what receipt extraction needs.
+
+Better forgery detection: The core weakness is that our features cannot see pixel-level tampering. A CNN or Vision Transformer trained to spot copy-paste artifacts would catch what our features miss. I tried to use EfficientNet via PyTorch but hit DLL errors on Windows that I could not resolve.
+
+More training data: 94 forged training samples is very little. The model cannot learn reliable patterns from that. With more forged examples the XGBoost model would improve significantly.
+
+Docker containerization: Did not have time to complete the Dockerfile.
+
+Full CORD integration: I downloaded CORD and confirmed the pipeline handles it without errors, but did not leverage its item-level annotations for richer feature engineering.
+
+---
+
+## Live Demo
+
+The cloud demo uses Tesseract OCR instead of PaddleOCR. Extraction accuracy is lower but the interface is fully functional.
+
+Live app: https://docfusion-codestacker-2026-guwbvmje4cv2srqpd5tddw.streamlit.app
+
+To run the full version locally with PaddleOCR:
+```
+git clone https://github.com/mozaalismaili/docfusion-codestacker-2026.git
+cd docfusion-codestacker-2026
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
+```
 
 ---
 
 ## Honest Acknowledgments
 
-The Streamlit web UI (`app.py`) was built with AI assistance. I have solid Python 
-and ML experience but limited frontend and UI experience. I used AI to help 
-structure the Streamlit layout while I focused my energy on the core pipeline,
-the OCR, extraction logic, feature engineering, and model training. I believe in 
-being transparent about this.
+The Streamlit web UI was built with AI assistance. I have solid Python and ML experience but limited UI experience. I used AI to help structure the layout while I focused on the core pipeline — OCR, extraction, feature engineering, and model training. I think being honest about this matters.
 
-The core ML pipeline, feature engineering decisions, model selection reasoning, 
-and all the debugging were done by me working through the problem step by step.
+Everything else — the dataset exploration, feature engineering decisions, model selection, debugging, and the iterations that did not work — was done by me working through the problem step by step.
 
 ---
 
 ## What I Enjoyed
 
-Trying different solutions to improve performance was genuinely enjoyable. Every 
-time a metric improved — even slightly — it felt like progress. I especially 
-enjoyed the feature engineering process for anomaly detection: thinking about 
-what signals a forged receipt might leave behind, and translating those intuitions 
-into numerical features. That bridge between human reasoning and machine learning 
-is what I find most interesting about this field.
+Trying different solutions to improve performance was genuinely the most enjoyable part. Every small improvement felt like progress. I especially liked the feature engineering process — thinking about what a forged receipt might look like and translating that intuition into numbers the model can learn from. That connection between human reasoning and machine learning is what I find most interesting about this field.
 
 ---
 
 ## Project Structure
 ```
 docfusion-codestacker-2026/
-├── solution.py          # Harness interface (Level 4)
-├── app.py               # Streamlit web UI (Level 3)
-├── check_submission.py  # Local validation script
-├── requirements.txt     # Dependencies
+├── solution.py           -- harness interface (Level 4)
+├── app.py                -- full Streamlit app using PaddleOCR (local)
+├── app_cloud.py          -- cloud Streamlit app using Tesseract
+├── check_submission.py   -- local validation script
+├── requirements.txt      -- dependencies
+├── packages.txt          -- system dependencies for cloud
 ├── README.md
 ├── src/
-│   ├── extractor.py     # OCR + field extraction (Level 2)
-│   ├── anomaly.py       # Anomaly detection ML model (Level 3)
-│   └── evaluate.py      # Evaluation script
+│   ├── extractor.py      -- PaddleOCR + regex extraction (Level 2)
+│   ├── anomaly.py        -- XGBoost anomaly detection (Level 3)
+│   └── evaluate.py       -- accuracy measurement
 ├── notebooks/
-│   └── 01_eda.ipynb     # EDA notebook (Level 1)
-├── dummy_data/          # Local test data from challenge repo
+│   └── 01_eda.ipynb      -- EDA notebook (Level 1)
+├── dummy_data/           -- test data from challenge repo
 │   ├── train/
 │   └── test/
 └── models/
-    └── anomaly/         # Saved model artifacts
+    └── anomaly/          -- saved model files
 ```
 
-## Setup
-```bash
-python -m venv venv
-venv\Scripts\activate        # Windows
-pip install -r requirements.txt
-```
-
-## Run Web UI
-```bash
-streamlit run app.py
-```
-
-## Run Local Validation
-```bash
-python check_submission.py --submission .
-```
-
-## Train Anomaly Model
-```bash
-python src/anomaly.py
-```
+---
 
 ## Tech Stack
 
 | Tool | Purpose |
 |---|---|
-| PaddleOCR | OCR engine for reading receipt text |
-| scikit-learn | Random Forest anomaly detection |
-| OpenCV | Image feature extraction |
-| Streamlit | Web UI dashboard |
-| Pandas | Data exploration and EDA |
+| PaddleOCR | OCR engine for reading receipt text (local) |
+| Tesseract | OCR engine for cloud deployment |
+| XGBoost | Anomaly detection model |
+| scikit-learn | Feature scaling and evaluation |
+| OpenCV + scikit-image | Image feature extraction |
+| Streamlit | Web UI |
+| Pandas | Data exploration |
 | Jupyter | EDA notebook |
+
+---
 
 ## Datasets
 
 | Dataset | Source | Role |
 |---|---|---|
-| SROIE | Kaggle | Primary extraction training data |
-| CORD | HuggingFace | Layout diversity and robustness |
-| Find-It-Again | L3i / Kaggle | Forgery detection labels |
+| SROIE | Kaggle | Extraction evaluation |
+| CORD | HuggingFace | Pipeline robustness testing |
+| Find-It-Again | L3i / Kaggle | Forgery detection training |
 
-## Why Each Dataset Was Used Differently
+---
 
-A key insight from this challenge is that the three datasets serve fundamentally 
-different purposes and cannot be used interchangeably.
+## About Me
 
-SROIE was used to evaluate extraction accuracy, it has clean vendor, date, and 
-total labels which made it perfect for measuring how well our regex rules perform. 
-With more time I would have used it to train a proper NER extraction model instead 
-of relying on rules.
-
-CORD was downloaded and available but not fully leveraged. Its value is in layout 
-diversity, thousands of receipts with different structures. I used it to confirm 
-the pipeline handles varied formats without crashing, but did not train on it 
-directly because its ground truth focuses on item-level annotations rather than 
-the key fields the challenge requires.
-
-Find-It-Again was the only dataset used for anomaly model training because it is 
-the only one with forgery labels. This is not a limitation of our approach, it 
-is a fundamental constraint of supervised learning. You cannot teach a model to 
-detect forgery without examples of both genuine and forged documents.
-
-This separation taught me something important: in real document intelligence 
-systems, different models serve different purposes and are trained on different 
-data. A production system would have a dedicated extraction model, a dedicated 
-anomaly model, and a separate quality control layer — each trained on the most 
-appropriate data for its specific task.
+Moza Amur
+Final-year Computer Science student
+Sultan Qaboos University
+Specialization: Artificial Intelligence and Data Science

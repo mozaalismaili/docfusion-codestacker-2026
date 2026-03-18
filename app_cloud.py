@@ -123,8 +123,6 @@ Rihal CodeStacker 2026 ML Challenge.
 - Random Forest for forgery detection
 
 **By:** Moza Amur  
-**University:** Sultan Qaboos University  
-**Specialization:** AI & Data Science
 """)
 
 with st.spinner("Loading OCR engine — this may take a moment on first run..."):

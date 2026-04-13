@@ -1,4 +1,4 @@
-# DocFusion — Rihal CodeStacker 2026 ML Challenge
+# DocFusion Rihal CodeStacker 2026 ML Challenge
 by Moza Amur
 
 ---

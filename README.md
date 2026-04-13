@@ -8,7 +8,7 @@ by Moza Amur
 DocFusion is an intelligent document processing pipeline. You give it a receipt image, it reads the text, pulls out the important fields like vendor name, date, and total amount, and then decides if the receipt looks genuine or forged.
 
 I built this for the Rihal CodeStacker 2026 ML Challenge.
-This README is my honest story of how I built it — what I tried, what failed, what worked, and what I would do differently.
+This README is my honest story of how I built it, what I tried, what failed, what worked, and what I would do differently.
 
 ---
 
@@ -32,15 +32,15 @@ Three datasets, four levels, an autograder, and a web UI (all within a tight dea
 
 I used three datasets. They each have a different job.
 
-**SROIE** — 973 scanned English receipts with labeled fields (vendor, date, total). I used this to measure how accurate my field extraction is.
+**SROIE** -> 973 scanned English receipts with labeled fields (vendor, date, total). I used this to measure how accurate my field extraction is.
 
-**CORD** — 1000 receipts with diverse layouts from different shops and countries. I used this to test that the pipeline does not break on unusual formats.
+**CORD** -> 1000 receipts with diverse layouts from different shops and countries. I used this to test that the pipeline does not break on unusual formats.
 
-**Find-It-Again** — 988 receipts where 163 of them are forged. Realistic forgeries — copy-paste attacks, tampered text. I used this to train the anomaly detection model.
+**Find-It-Again** -> 988 receipts where 163 of them are forged. Realistic forgeries, copy-paste attacks, tampered text. I used this to train the anomaly detection model.
 
 One thing I discovered early: these three datasets cannot be used interchangeably. CORD does not have vendor or date in its ground truth. SROIE has no forgery labels. Only Find-It-Again has forgery labels. Each dataset has its own purpose and I had to respect that.
 
-I also found out through a GitHub issue on the challenge repo that returning null for missing fields is acceptable. That changed my thinking — the goal is not perfect extraction, it is a robust pipeline that handles anything you throw at it.
+I also found out through a GitHub issue on the challenge repo that returning null for missing fields is acceptable. That changed my thinking, the goal is not perfect extraction, it is a robust pipeline that handles anything you throw at it.
 
 ---
 
@@ -127,11 +127,11 @@ Overall: 78% accuracy
 Forged F1: 0.19
 ```
 
-The model was basically ignoring forged receipts. Two problems. First, the dataset is heavily imbalanced — only 16% forged. A model that always says genuine gets 84% accuracy without learning anything. Second, the forgeries in Find-It-Again are visual — tampered pixels and copy-paste. Text features alone cannot catch that.
+The model was basically ignoring forged receipts. Two problems. First, the dataset is heavily imbalanced (only 16% forged). A model that always says genuine gets 84% accuracy without learning anything. Second, the forgeries in Find-It-Again are visual, tampered pixels and copy-paste. Text features alone cannot catch that.
 
 **Iteration 2: Text + basic OpenCV image features**
 
-I added brightness statistics, edge density, and block variance to detect inconsistent regions. The forged recall actually got worse — more features confused the model because we had too little training data.
+I added brightness statistics, edge density, and block variance to detect inconsistent regions. The forged recall actually got worse, more features confused the model because we had too little training data.
 ```
 Forged F1: 0.14
 ```
@@ -145,7 +145,7 @@ Forged F1: 0.10
 
 **Iteration 4: Switch to XGBoost**
 
-I switched from Random Forest to XGBoost with scale_pos_weight to handle the class imbalance automatically. XGBoost builds trees sequentially — each tree learns from the mistakes of the previous one. Combined with the image features, this gave the best result.
+I switched from Random Forest to XGBoost with scale_pos_weight to handle the class imbalance automatically. XGBoost builds trees sequentially, each tree learns from the mistakes of the previous one. Combined with the image features, this gave the best result.
 ```
 Genuine: 84% precision, 90% recall
 Forged:  27% precision, 18% recall
@@ -209,22 +209,6 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
----
-
-## Honest Acknowledgments
-
-The Streamlit web UI was built with AI assistance. I have solid Python and ML experience but limited UI experience. I used AI to help structure the layout while I focused on the core pipeline — OCR, extraction, feature engineering, and model training. I think being honest about this matters.
-
-Everything else — the dataset exploration, feature engineering decisions, model selection, debugging, and the iterations that did not work — was done by me working through the problem step by step.
-
----
-
-## What I Enjoyed
-
-Trying different solutions to improve performance was genuinely the most enjoyable part. Every small improvement felt like progress. I especially liked the feature engineering process — thinking about what a forged receipt might look like and translating that intuition into numbers the model can learn from. That connection between human reasoning and machine learning is what I find most interesting about this field.
-
----
-
 ## Project Structure
 ```
 docfusion-codestacker-2026/
@@ -275,7 +259,6 @@ docfusion-codestacker-2026/
 
 ---
 
-## About Me
 
 Moza Amur
 Final-year Computer Science student
